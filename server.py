@@ -75,6 +75,10 @@ def disconnect(sid):
             CLIENTS[pid]["disconnected_at"] = bias_util.get_current_time()
             print(f"Disconnected: Participant ID: {pid} | Socket ID: {sid}")
 
+# Debug handler to catch all events
+@SIO.event
+async def message(sid, data):
+    print(f"🔍 Received message event from {sid}: {data}")
 
 @SIO.event
 async def on_session_end_page_level_logs(sid, payload):
@@ -177,6 +181,9 @@ async def on_interaction(sid, data):
 
 @SIO.event
 async def receive_external_question(sid, question_data):
+    print(f"📥 Received external question event from {sid}")
+    print(f"📋 Raw question data: {question_data}")
+    
     formatted_question = {
         "type": "question",
         "id": question_data.get("id", str(datetime.now().timestamp())),
@@ -184,10 +191,14 @@ async def receive_external_question(sid, question_data):
         "timestamp": datetime.now().isoformat(),
     }
     
-    print(f"Received external question from {sid}: {formatted_question}")
+    print(f"✅ Processed external question from {sid}: {formatted_question}")
     
     # Store in Firestore
-    db.collection('questions').add(formatted_question)
+    try:
+        db.collection('questions').add(formatted_question)
+        print(f"💾 Stored question in Firestore")
+    except Exception as e:
+        print(f"❌ Error storing in Firestore: {e}")
     
     # Simple broadcast to all clients except sender
     await SIO.emit(
@@ -196,7 +207,7 @@ async def receive_external_question(sid, question_data):
         broadcast=True,
         include_self=False,  # Don't send back to sender
     )
-   
+    print(f"📤 Broadcasted question to all clients")
 
 @SIO.event
 async def on_question_response(sid, data):
