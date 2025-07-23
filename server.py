@@ -22,6 +22,7 @@ CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING = {}
 CLIENT_SOCKET_ID_PARTICIPANT_MAPPING = {}
 COMPUTE_BIAS_FOR_TYPES = [
     "mouseout_item",
+    "mouseover_item",
     "mouseout_group",
     "click_group",
     "click_add_item",
