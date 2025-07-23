@@ -157,13 +157,28 @@ async def on_interaction(sid, data):
     response["input_data"] = data
 
     # check whether to compute bias metrics or not
+    print(f"DEBUG: Interaction type: {interaction_type}")
+    print(f"DEBUG: COMPUTE_BIAS_FOR_TYPES: {COMPUTE_BIAS_FOR_TYPES}")
+    print(f"DEBUG: Is interaction_type in COMPUTE_BIAS_FOR_TYPES: {interaction_type in COMPUTE_BIAS_FOR_TYPES}")
+    
     if interaction_type in COMPUTE_BIAS_FOR_TYPES:
+        print(f"DEBUG: Computing bias metrics for {interaction_type}")
         CLIENTS[pid]["bias_logs"].append(data)
         metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
         response["output_data"] = metrics
+        print(f"DEBUG: Computed bias metrics: {metrics}")
+    else:
+        print(f"DEBUG: Skipping bias computation for {interaction_type}")
         
     # Send response back to the client
-    await SIO.emit("interaction_response", response, room=sid)
+    try:
+        print(f"DEBUG: Attempting to emit response to sid: {sid}")
+        print(f"DEBUG: Response object: {response}")
+        await SIO.emit("interaction_response", response, room=sid)
+        print(f"DEBUG: Successfully emitted interaction_response")
+    except Exception as e:
+        print(f"ERROR: Failed to emit interaction_response: {e}")
+        print(f"ERROR: Exception type: {type(e)}")
         
     # Create simplified interaction data
     simplified_data = {
