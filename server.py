@@ -162,7 +162,10 @@ async def on_interaction(sid, data):
         metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
         response["output_data"] = metrics
         
-            # Create simplified interaction data
+    # Send response back to the client
+    await SIO.emit("interaction_response", response, room=sid)
+        
+    # Create simplified interaction data
     simplified_data = {
         "participant_id": pid,
         "interaction_type": interaction_type,
