@@ -75,6 +75,20 @@ DATA_MAP = {
         ],
         "data": {},
     },
+    "tutorial_dataset_movie.csv": {
+        "attributes": [],
+        "distribution": {},
+        "numerical_attributes": [
+            "Worldwide Gross",
+            "Production Budget",
+            "Release Year",
+            "Running Time",
+            "Rotten Tomatoes Rating",
+            "IMDB Rating",
+            "Profit Ratio"
+        ],
+        "data": {},
+    },
     "euro.csv": {
         "attributes": [],
         "distribution": {},
