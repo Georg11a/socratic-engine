@@ -172,8 +172,14 @@ def read_data(filename):
         reader = csv.DictReader(csvfile, delimiter=",", quotechar='"')
         dataset["attributes"] = reader.fieldnames
         for row in reader:
-            # Handle both 'id' and 'voter_id' cases
-            id_field = "voter_id" if "voter_id" in row else "id"
+            # Handle different ID field cases
+            if filename == "tutorial_dataset_movie.csv":
+                id_field = "Title"
+            elif "voter_id" in row:
+                id_field = "voter_id"
+            else:
+                id_field = "id"
+            
             data[row[id_field]] = {}  # store data in data dict
             for attr in row:
                 if attr in dataset["numerical_attributes"]:
