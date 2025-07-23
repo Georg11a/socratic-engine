@@ -287,6 +287,9 @@ def data_point_distribution(logs, active_data):
     for item in active_data:
         dpd_details["counts"][item] = 0
 
+    print(f"DEBUG: Initialized counts for {len(active_data)} data points")
+    print(f"DEBUG: Sample data point keys: {list(active_data.keys())[:5]}")
+
     # iterate through the logs to count distribution
     log_counter = 0
     # Comment out the below line IFF we want to
@@ -305,10 +308,22 @@ def data_point_distribution(logs, active_data):
                     #   group / aggregation (e.g., bar, line, dot) should not
                     #   be considered as an interaction with individual points.
                     #   No need to increment this counter.
-                    dpd_details["counts"][_id] += 1.0 / agg_size
+                    if _id in dpd_details["counts"]:
+                        dpd_details["counts"][_id] += 1.0 / agg_size
+                        print(f"DEBUG: Incremented {_id} by {1.0/agg_size} (aggregate)")
+                    else:
+                        print(f"DEBUG: ID {_id} not found in counts (aggregate)")
             else:
                 log_counter += 1
-                dpd_details["counts"][log["data"]["id"]] += 1
+                _id = log["data"]["id"]
+                if _id in dpd_details["counts"]:
+                    dpd_details["counts"][_id] += 1
+                    print(f"DEBUG: Incremented {_id} by 1 (single)")
+                else:
+                    print(f"DEBUG: ID {_id} not found in counts (single)")
+
+    print(f"DEBUG: Final counts: {dict(list(dpd_details['counts'].items())[:10])}")
+    print(f"DEBUG: Total log counter: {log_counter}")
 
     # construct an array of expected values and an array of observed values
     expected = 1.0 * log_counter / len(active_data)
