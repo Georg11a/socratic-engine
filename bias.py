@@ -131,7 +131,11 @@ DATA_MAP = {
         "distribution": {},
         "numerical_attributes": [
             "age",
-            "income"
+            "income",
+            "abortion_view",
+            "gun_control_view",
+            "climate_change_view",
+            "immigration_view"
         ],
         "data": {},
     },
@@ -505,7 +509,7 @@ def attribute_distribution(logs, active_data, active_attrs, active_attr_distr, a
             ad_details[attr]["ks_stat"] = ks_stat
             ad_details[attr]["p_value"] = "TODO"  # TODO
 
-        except ValueError:
+        else:
             # categorical attribute -- chi-square test
             user_distr = {}
             user_distr_flat = []

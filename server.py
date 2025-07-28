@@ -185,7 +185,7 @@ async def on_interaction(sid, data):
         "participant_id": pid,
         "interaction_type": interaction_type,
         "interacted_value": data["data"],
-        "group": "socratic",
+        "group": data.get("group"),  # Read from frontend, default to "interaction_trace"
         "timestamp": data["interactionAt"]
     }
     try:
