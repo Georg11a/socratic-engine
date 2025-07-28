@@ -509,7 +509,7 @@ def attribute_distribution(logs, active_data, active_attrs, active_attr_distr, a
             ad_details[attr]["ks_stat"] = ks_stat
             ad_details[attr]["p_value"] = "TODO"  # TODO
 
-        else:
+        except ValueError:
             # categorical attribute -- chi-square test
             user_distr = {}
             user_distr_flat = []
