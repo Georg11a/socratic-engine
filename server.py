@@ -20,6 +20,8 @@ currdir = Path(__file__).parent.absolute()
 CLIENTS = {}  # entire data map of all client data
 CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING = {}
 CLIENT_SOCKET_ID_PARTICIPANT_MAPPING = {}
+# Add new tracking for socket-based interaction counts
+SOCKET_INTERACTION_LOGS = {}  # Track interactions per socket ID
 COMPUTE_BIAS_FOR_TYPES = [
     "mouseout_item",
     "mouseover_item", 
@@ -77,6 +79,11 @@ def disconnect(sid):
         if pid in CLIENTS:
             CLIENTS[pid]["disconnected_at"] = bias_util.get_current_time()
             print(f"Disconnected: Participant ID: {pid} | Socket ID: {sid}")
+    
+    # Clean up socket-based interaction tracking
+    if sid in SOCKET_INTERACTION_LOGS:
+        del SOCKET_INTERACTION_LOGS[sid]
+        print(f"Cleaned up socket interaction logs for: {sid}")
 
 # Debug handler to catch all events
 @SIO.event
@@ -126,6 +133,35 @@ async def on_interaction(sid, data):
     CLIENT_SOCKET_ID_PARTICIPANT_MAPPING[sid] = pid
     CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING[pid] = sid
 
+    # Initialize socket-based interaction tracking
+    if sid not in SOCKET_INTERACTION_LOGS:
+        SOCKET_INTERACTION_LOGS[sid] = {
+            "app_mode": app_mode,
+            "app_type": app_type,
+            "app_level": app_level,
+            "participant_id": pid,
+            "interaction_count": 0,
+            "bias_logs": []
+        }
+        # Reset participant logs for new session
+        if pid in CLIENTS:
+            CLIENTS[pid]["bias_logs"] = []
+            CLIENTS[pid]["response_list"] = []
+    else:
+        # Check if this is a new session (same socket but different app_mode/app_level)
+        current_session = SOCKET_INTERACTION_LOGS[sid]
+        if app_mode != current_session["app_mode"] or app_level != current_session["app_level"]:
+            # Update session info and reset counts
+            SOCKET_INTERACTION_LOGS[sid]["app_mode"] = app_mode
+            SOCKET_INTERACTION_LOGS[sid]["app_type"] = app_type
+            SOCKET_INTERACTION_LOGS[sid]["app_level"] = app_level
+            SOCKET_INTERACTION_LOGS[sid]["bias_logs"] = []
+            SOCKET_INTERACTION_LOGS[sid]["interaction_count"] = 0
+            # Reset participant logs for session change
+            if pid in CLIENTS:
+                CLIENTS[pid]["bias_logs"] = []
+                CLIENTS[pid]["response_list"] = []
+
     if pid not in CLIENTS:
         # new participant => establish data mapping for them!
         CLIENTS[pid] = {}
@@ -138,14 +174,11 @@ async def on_interaction(sid, data):
         CLIENTS[pid]["bias_logs"] = []
         CLIENTS[pid]["response_list"] = []
 
+    # Update participant info if needed (but don't reset logs here - handled in socket initialization)
     if app_mode != CLIENTS[pid]["app_mode"] or app_level != CLIENTS[pid]["app_level"]:
-        # datasets have been switched => reset the logs array!
-        # OR
-        # app_level (e.g. practice > live) is changed but same dataset is in use => reset the logs array!
         CLIENTS[pid]["app_mode"] = app_mode
         CLIENTS[pid]["app_level"] = app_level
-        CLIENTS[pid]["bias_logs"] = []
-        CLIENTS[pid]["response_list"] = []
+        # Note: Log reset is handled in socket initialization above
 
     # record response to interaction
     response = {}
@@ -161,6 +194,11 @@ async def on_interaction(sid, data):
     # check whether to compute bias metrics or not
     if interaction_type in COMPUTE_BIAS_FOR_TYPES:
         CLIENTS[pid]["bias_logs"].append(data)
+        # Track interactions per socket ID for threshold checking
+        SOCKET_INTERACTION_LOGS[sid]["bias_logs"].append(data)
+        SOCKET_INTERACTION_LOGS[sid]["interaction_count"] += 1
+        
+        # Use participant-based logs for bias computation (original Lumos approach)
         metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
         
         # For individual point interactions, only send back the updated point
@@ -170,9 +208,9 @@ async def on_interaction(sid, data):
             # Check if this is a bar chart interaction by looking at the chart type or interaction type
             is_bar_chart_interaction = data.get("chartType") == "barchart" or interaction_type in ["mouseover_group", "mouseout_group", "click_group"]
             
-            # Check if we have enough interactions to show bias data
-            has_enough_interactions = len(CLIENTS[pid]["bias_logs"]) >= 20  # MIN_LOG_NUM
-            print(f"DEBUG: Interaction count: {len(CLIENTS[pid]['bias_logs'])}, Threshold: 20, Has enough: {has_enough_interactions}")
+            # Check if we have enough interactions for THIS SOCKET to show bias data
+            socket_interaction_count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
+            has_enough_interactions = socket_interaction_count >= 20  # MIN_LOG_NUM
             
             if isinstance(point_id, list) or is_bar_chart_interaction:
                 # BAR CHART: Send back only the points in the interacted bar
@@ -186,10 +224,8 @@ async def on_interaction(sid, data):
                         for pid in point_id:
                             if pid in all_counts:
                                 bar_points[pid] = all_counts[pid]
-                        print(f"DEBUG: Bar chart interaction - point_id type: {type(point_id)}, length: {len(point_id)}, bar_points: {len(bar_points)}")
                     else:
                         # This shouldn't happen for bar chart interactions, but just in case
-                        print(f"WARNING: Expected list of IDs for bar chart interaction, got: {type(point_id)}")
                         bar_points = {}
                         if point_id in all_counts:
                             bar_points[point_id] = all_counts[point_id]
@@ -202,7 +238,7 @@ async def on_interaction(sid, data):
                         ]
                     }
                     
-                    # Only include attribute data if we have enough interactions
+                    # Only include attribute data if THIS SOCKET has enough interactions
                     if has_enough_interactions:
                         modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
                         modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
@@ -224,7 +260,7 @@ async def on_interaction(sid, data):
                             ]
                         }
                         
-                        # Only include attribute data if we have enough interactions
+                        # Only include attribute data if THIS SOCKET has enough interactions
                         if has_enough_interactions:
                             modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
                             modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
@@ -359,6 +395,26 @@ async def recieve_interaction(sid, data):
             print(f"Firebase not available - interaction logged: {simplified_data}")
     except Exception as e:
         print(f"Error storing interaction: {e}")
+
+@SIO.event
+async def reset_interaction_count(sid, data):
+    """Manually reset interaction count for a specific socket"""
+    if sid in SOCKET_INTERACTION_LOGS:
+        old_count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
+        SOCKET_INTERACTION_LOGS[sid]["bias_logs"] = []
+        SOCKET_INTERACTION_LOGS[sid]["interaction_count"] = 0
+        await SIO.emit("interaction_count_reset", {"success": True, "old_count": old_count, "new_count": 0}, room=sid)
+    else:
+        await SIO.emit("interaction_count_reset", {"success": False, "error": "Socket not found"}, room=sid)
+
+@SIO.event
+async def get_interaction_count(sid, data):
+    """Get current interaction count for a specific socket"""
+    if sid in SOCKET_INTERACTION_LOGS:
+        count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
+        await SIO.emit("interaction_count_response", {"count": count}, room=sid)
+    else:
+        await SIO.emit("interaction_count_response", {"count": 0, "error": "Socket not found"}, room=sid)
 
 if __name__ == "__main__":
     bias.precompute_distributions()
