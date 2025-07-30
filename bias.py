@@ -18,7 +18,7 @@ from scipy.stats import ks_2samp
 import bias_util
 
 NUM_QUANTILES = 4
-MIN_LOG_NUM = 10
+MIN_LOG_NUM = 20  # Increased from 10 to 20 to prevent early bias computation
 DATA_MAP = {
     "credit_risk.csv": {
         "attributes": [],

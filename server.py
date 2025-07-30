@@ -164,38 +164,49 @@ async def on_interaction(sid, data):
         metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
         
         # For individual point interactions, only send back the updated point
-        if interaction_type in ["mouseover_item", "mouseout_item", "click_item"] and "data" in data and "id" in data["data"]:
+        if interaction_type in ["mouseover_item", "mouseout_item", "click_item", "mouseover_group", "mouseout_group", "click_group"] and "data" in data and "id" in data["data"]:
             point_id = data["data"]["id"]
             
-            # Check if this is a bar chart interaction by looking at the chart type
-            is_bar_chart_interaction = data.get("chartType") == "barchart"
+            # Check if this is a bar chart interaction by looking at the chart type or interaction type
+            is_bar_chart_interaction = data.get("chartType") == "barchart" or interaction_type in ["mouseover_group", "mouseout_group", "click_group"]
+            
+            # Check if we have enough interactions to show bias data
+            has_enough_interactions = len(CLIENTS[pid]["bias_logs"]) >= 20  # MIN_LOG_NUM
+            print(f"DEBUG: Interaction count: {len(CLIENTS[pid]['bias_logs'])}, Threshold: 20, Has enough: {has_enough_interactions}")
             
             if isinstance(point_id, list) or is_bar_chart_interaction:
-                # BAR CHART: Send back only the points in the clicked bar
+                # BAR CHART: Send back only the points in the interacted bar
                 if "data_point_distribution" in metrics and len(metrics["data_point_distribution"]) > 1:
                     all_counts = metrics["data_point_distribution"][1]["counts"]
                     
-                    # For bar chart interactions, only send back the points that were in the bar
+                    # For bar chart interactions, we should always have a list of point IDs
                     if isinstance(point_id, list):
                         # point_id is already the array of points in the bar
                         bar_points = {}
                         for pid in point_id:
                             if pid in all_counts:
                                 bar_points[pid] = all_counts[pid]
+                        print(f"DEBUG: Bar chart interaction - point_id type: {type(point_id)}, length: {len(point_id)}, bar_points: {len(bar_points)}")
                     else:
-                        # For bar chart hover, we need to find all points that belong to this bar
-                        # This is more complex - we might need to send back all points for now
-                        bar_points = all_counts
+                        # This shouldn't happen for bar chart interactions, but just in case
+                        print(f"WARNING: Expected list of IDs for bar chart interaction, got: {type(point_id)}")
+                        bar_points = {}
+                        if point_id in all_counts:
+                            bar_points[point_id] = all_counts[point_id]
                     
                     modified_metrics = {
                         "data_point_coverage": metrics["data_point_coverage"],
                         "data_point_distribution": [
                             metrics["data_point_distribution"][0],  # Keep the metric value
                             {"counts": bar_points}  # Only the points in this bar
-                        ],
-                        "attribute_coverage": metrics["attribute_coverage"],
-                        "attribute_distribution": metrics["attribute_distribution"]
+                        ]
                     }
+                    
+                    # Only include attribute data if we have enough interactions
+                    if has_enough_interactions:
+                        modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
+                        modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
+                    
                     response["output_data"] = modified_metrics
                 else:
                     response["output_data"] = metrics
@@ -210,10 +221,14 @@ async def on_interaction(sid, data):
                             "data_point_distribution": [
                                 metrics["data_point_distribution"][0],  # Keep the metric value
                                 {"counts": {point_id: all_counts[point_id]}}  # Only the updated point
-                            ],
-                            "attribute_coverage": metrics["attribute_coverage"],
-                            "attribute_distribution": metrics["attribute_distribution"]
+                            ]
                         }
+                        
+                        # Only include attribute data if we have enough interactions
+                        if has_enough_interactions:
+                            modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
+                            modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
+                        
                         response["output_data"] = modified_metrics
                     else:
                         response["output_data"] = metrics
