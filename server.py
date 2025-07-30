@@ -22,11 +22,13 @@ CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING = {}
 CLIENT_SOCKET_ID_PARTICIPANT_MAPPING = {}
 COMPUTE_BIAS_FOR_TYPES = [
     "mouseout_item",
-    "mouseover_item",
+    "mouseover_item", 
     "mouseout_group",
+    "mouseover_group",
     "click_group",
     "click_add_item",
     "click_remove_item",
+    "click_item"
 ]
 
 SIO = socketio.AsyncServer(cors_allowed_origins='*')
@@ -113,7 +115,7 @@ async def on_save_logs(sid, data):
 
 @SIO.event
 async def on_interaction(sid, data):
-    app_mode = data["appMode"]  # The dataset that is being used, e.g. cars.csv
+    app_mode = data["appMode"]  # The dataset that is being used, e.g. synthetic_voters_v14.csv
     app_type = data["appType"]  # CONTROL / AWARENESS / ADMIN
     app_level = data["appLevel"]  # live / practice
     pid = data["participantId"]
@@ -157,25 +159,72 @@ async def on_interaction(sid, data):
     response["input_data"] = data
 
     # check whether to compute bias metrics or not
-    print(f"DEBUG: Interaction type: {interaction_type}")
-    print(f"DEBUG: COMPUTE_BIAS_FOR_TYPES: {COMPUTE_BIAS_FOR_TYPES}")
-    print(f"DEBUG: Is interaction_type in COMPUTE_BIAS_FOR_TYPES: {interaction_type in COMPUTE_BIAS_FOR_TYPES}")
-    
     if interaction_type in COMPUTE_BIAS_FOR_TYPES:
-        print(f"DEBUG: Computing bias metrics for {interaction_type}")
         CLIENTS[pid]["bias_logs"].append(data)
         metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
-        response["output_data"] = metrics
-        print(f"DEBUG: Computed bias metrics: {metrics}")
-    else:
-        print(f"DEBUG: Skipping bias computation for {interaction_type}")
+        
+        # For individual point interactions, only send back the updated point
+        if interaction_type in ["mouseover_item", "mouseout_item", "click_item"] and "data" in data and "id" in data["data"]:
+            point_id = data["data"]["id"]
+            
+            # Check if this is a bar chart interaction by looking at the chart type
+            is_bar_chart_interaction = data.get("chartType") == "barchart"
+            
+            if isinstance(point_id, list) or is_bar_chart_interaction:
+                # BAR CHART: Send back only the points in the clicked bar
+                if "data_point_distribution" in metrics and len(metrics["data_point_distribution"]) > 1:
+                    all_counts = metrics["data_point_distribution"][1]["counts"]
+                    
+                    # For bar chart interactions, only send back the points that were in the bar
+                    if isinstance(point_id, list):
+                        # point_id is already the array of points in the bar
+                        bar_points = {}
+                        for pid in point_id:
+                            if pid in all_counts:
+                                bar_points[pid] = all_counts[pid]
+                    else:
+                        # For bar chart hover, we need to find all points that belong to this bar
+                        # This is more complex - we might need to send back all points for now
+                        bar_points = all_counts
+                    
+                    modified_metrics = {
+                        "data_point_coverage": metrics["data_point_coverage"],
+                        "data_point_distribution": [
+                            metrics["data_point_distribution"][0],  # Keep the metric value
+                            {"counts": bar_points}  # Only the points in this bar
+                        ],
+                        "attribute_coverage": metrics["attribute_coverage"],
+                        "attribute_distribution": metrics["attribute_distribution"]
+                    }
+                    response["output_data"] = modified_metrics
+                else:
+                    response["output_data"] = metrics
+            else:
+                # SCATTER PLOT: Only send back the specific point
+                if "data_point_distribution" in metrics and len(metrics["data_point_distribution"]) > 1:
+                    all_counts = metrics["data_point_distribution"][1]["counts"]
+                    if point_id in all_counts:
+                        # Create a modified response with only the updated point
+                        modified_metrics = {
+                            "data_point_coverage": metrics["data_point_coverage"],
+                            "data_point_distribution": [
+                                metrics["data_point_distribution"][0],  # Keep the metric value
+                                {"counts": {point_id: all_counts[point_id]}}  # Only the updated point
+                            ],
+                            "attribute_coverage": metrics["attribute_coverage"],
+                            "attribute_distribution": metrics["attribute_distribution"]
+                        }
+                        response["output_data"] = modified_metrics
+                    else:
+                        response["output_data"] = metrics
+                else:
+                    response["output_data"] = metrics
+        else:
+            response["output_data"] = metrics
         
     # Send response back to the client
     try:
-        print(f"DEBUG: Attempting to emit response to sid: {sid}")
-        print(f"DEBUG: Response object: {response}")
         await SIO.emit("interaction_response", response, room=sid)
-        print(f"DEBUG: Successfully emitted interaction_response")
     except Exception as e:
         print(f"ERROR: Failed to emit interaction_response: {e}")
         print(f"ERROR: Exception type: {type(e)}")
@@ -190,8 +239,11 @@ async def on_interaction(sid, data):
     }
     try:
         # Store in Firestore
-        db.collection('interactions').add(simplified_data)
-        print(f"Stored interaction: {simplified_data}")
+        if db:
+            db.collection('interactions').add(simplified_data)
+            print(f"Stored interaction: {simplified_data}")
+        else:
+            print(f"Firebase not available - interaction logged: {simplified_data}")
     except Exception as e:
         print(f"Error storing interaction: {e}")
 
@@ -214,10 +266,13 @@ async def receive_external_question(sid, question_data):
     
     # Store in Firestore
     try:
-        db.collection('questions').add(formatted_question)
-        print(f"💾 Stored question in Firestore")
+        if db:
+            db.collection('questions').add(formatted_question)
+            print(f"💾 Stored question in Firestore")
+        else:
+            print(f"Firebase not available - question logged: {formatted_question}")
     except Exception as e:
-        print(f"❌ Error storing in Firestore: {e}")
+        pass
     
     # Simple broadcast to all clients except sender
     await SIO.emit(
@@ -239,8 +294,11 @@ async def on_question_response(sid, data):
     }
     try:
         # Store in Firestore
-        db.collection('responses').add(response)
-        print(f"Stored response: {response}")
+        if db:
+            db.collection('responses').add(response)
+            print(f"Stored response: {response}")
+        else:
+            print(f"Firebase not available - response logged: {response}")
         
     except Exception as e:
         print(f"Error storing response: {e}")
@@ -256,8 +314,11 @@ async def on_insight(sid, data):
     
     try:
         # Store in Firestore
-        db.collection('insights').add(insight)
-        print(f"Stored insight: {insight}")
+        if db:
+            db.collection('insights').add(insight)
+            print(f"Stored insight: {insight}")
+        else:
+            print(f"Firebase not available - insight logged: {insight}")
         
     except Exception as e:
         print(f"Error storing insight: {e}")
@@ -276,8 +337,11 @@ async def recieve_interaction(sid, data):
     }
     try:
         # Store in Firestore
-        db.collection('interactions').add(simplified_data)
-        print(f"Stored interaction: {simplified_data}")
+        if db:
+            db.collection('interactions').add(simplified_data)
+            print(f"Stored interaction: {simplified_data}")
+        else:
+            print(f"Firebase not available - interaction logged: {simplified_data}")
     except Exception as e:
         print(f"Error storing interaction: {e}")
 
