@@ -88,7 +88,16 @@ def disconnect(sid):
 # Debug handler to catch all events
 @SIO.event
 async def message(sid, data):
-    print(f"🔍 Received message event from {sid}: {data}")
+    
+    # Route insight operations to appropriate handlers
+    if isinstance(data, dict):
+        message_type = data.get("type")
+        if message_type == "edit_insight":
+            await on_edit_insight(sid, data)
+        elif message_type == "delete_insight":
+            await on_delete_insight(sid, data)
+        elif message_type == "insight":
+            await on_insight(sid, data)
 
 @SIO.event
 async def on_session_end_page_level_logs(sid, payload):
@@ -303,9 +312,6 @@ async def on_interaction(sid, data):
 
 @SIO.event
 async def receive_external_question(sid, question_data):
-    print(f"📥 Received external question event from {sid}")
-    print(f"📋 Raw question data: {question_data}")
-    
     formatted_question = {
         "type": "question",
         "id": question_data.get("id", str(datetime.now().timestamp())),
@@ -373,6 +379,50 @@ async def on_insight(sid, data):
         
     except Exception as e:
         print(f"Error storing insight: {e}")
+
+@SIO.event
+async def on_edit_insight(sid, data):
+    """Handle insight edit operations"""
+    edit_data = {
+        "type": "edit_insight",
+        "index": data.get("index"),
+        "old_text": data.get("oldText"),
+        "new_text": data.get("newText"),
+        "participant_id": data.get("participantId"),
+        "timestamp": data.get("timestamp")
+    }
+    
+    try:
+        # Store in Firestore
+        if db:
+            db.collection('insight_edits').add(edit_data)
+            print(f"Stored insight edit: {edit_data}")
+        else:
+            print(f"Firebase not available - insight edit logged: {edit_data}")
+        
+    except Exception as e:
+        print(f"Error storing insight edit: {e}")
+
+@SIO.event
+async def on_delete_insight(sid, data):
+    """Handle insight delete operations"""
+    delete_data = {
+        "type": "delete_insight",
+        "index": data.get("index"),
+        "participant_id": data.get("participantId"),
+        "timestamp": data.get("timestamp")
+    }
+    
+    try:
+        # Store in Firestore
+        if db:
+            db.collection('insight_deletes').add(delete_data)
+            print(f"Stored insight delete: {delete_data}")
+        else:
+            print(f"Firebase not available - insight delete logged: {delete_data}")
+        
+    except Exception as e:
+        print(f"Error storing insight delete: {e}")
 
 @SIO.event
 async def recieve_interaction(sid, data):
