@@ -59,7 +59,6 @@ APP.router.add_route('GET', '/{fname:.*}', handle_ui_files)
 
 @SIO.event
 async def connect(sid, environ):
-    print(f"Connected: {sid}")
     attr_dist = {}
     for filename in bias.DATA_MAP:
         dataset = bias.DATA_MAP[filename]
@@ -73,12 +72,11 @@ def disconnect(sid):
         pid = CLIENT_SOCKET_ID_PARTICIPANT_MAPPING[sid]
         if pid in CLIENTS:
             CLIENTS[pid]["disconnected_at"] = bias_util.get_current_time()
-            print(f"Disconnected: Participant ID: {pid} | Socket ID: {sid}")
 
 # Debug handler to catch all events
 @SIO.event
 async def message(sid, data):
-    print(f"🔍 Received message event from {sid}: {data}")
+    pass
 
 @SIO.event
 async def on_session_end_page_level_logs(sid, payload):
@@ -91,8 +89,6 @@ async def on_session_end_page_level_logs(sid, payload):
 
         # persist to disk
         df_to_save.transpose().to_csv(filename, sep="\t")
-
-        print(f"Saved session logs to file: {filename}")
 
 
 @SIO.event
@@ -107,8 +103,6 @@ async def on_save_logs(sid, data):
 
             # persist to disk
             df_to_save.to_csv(filename, sep="\t")
-
-            print(f"Saved logs to file: {filename}")
 
 @SIO.event
 async def on_interaction(sid, data):
@@ -172,33 +166,34 @@ async def on_interaction(sid, data):
     try:
         # Store in Firestore
         db.collection('interactions').add(simplified_data)
-        print(f"Stored interaction: {simplified_data}")
     except Exception as e:
-        print(f"Error storing interaction: {e}")
+        pass
 
 
 
 
 @SIO.event
 async def receive_external_question(sid, question_data):
-    print(f"📥 Received external question event from {sid}")
-    print(f"📋 Raw question data: {question_data}")
+        # Get the question type from any of the fields we're sending
+    question_type = (
+        question_data.get("promptType") or 
+        question_data.get("questionCategory") or 
+        question_data.get("userSelectedType") or 
+        "socratic"  # default fallback
+    )
     
     formatted_question = {
-        "type": "question",
+        "type": question_type,
         "id": question_data.get("id", str(datetime.now().timestamp())),
         "text": question_data.get("text", ""),
         "timestamp": datetime.now().isoformat(),
     }
     
-    print(f"✅ Processed external question from {sid}: {formatted_question}")
-    
     # Store in Firestore
     try:
         db.collection('questions').add(formatted_question)
-        print(f"💾 Stored question in Firestore")
     except Exception as e:
-        print(f"❌ Error storing in Firestore: {e}")
+        pass
     
     # Simple broadcast to all clients except sender
     await SIO.emit(
@@ -207,7 +202,6 @@ async def receive_external_question(sid, question_data):
         broadcast=True,
         include_self=False,  # Don't send back to sender
     )
-    print(f"📤 Broadcasted question to all clients")
 
 @SIO.event
 async def on_question_response(sid, data):
@@ -221,10 +215,9 @@ async def on_question_response(sid, data):
     try:
         # Store in Firestore
         db.collection('responses').add(response)
-        print(f"Stored response: {response}")
         
     except Exception as e:
-        print(f"Error storing response: {e}")
+        pass
 
 @SIO.event
 async def on_insight(sid, data):
@@ -238,10 +231,9 @@ async def on_insight(sid, data):
     try:
         # Store in Firestore
         db.collection('insights').add(insight)
-        print(f"Stored insight: {insight}")
         
     except Exception as e:
-        print(f"Error storing insight: {e}")
+        pass
 
 @SIO.event
 async def recieve_interaction(sid, data):
@@ -258,9 +250,8 @@ async def recieve_interaction(sid, data):
     try:
         # Store in Firestore
         db.collection('interactions').add(simplified_data)
-        print(f"Stored interaction: {simplified_data}")
     except Exception as e:
-        print(f"Error storing interaction: {e}")
+        pass
 
 if __name__ == "__main__":
     bias.precompute_distributions()
