@@ -20,12 +20,17 @@ currdir = Path(__file__).parent.absolute()
 CLIENTS = {}  # entire data map of all client data
 CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING = {}
 CLIENT_SOCKET_ID_PARTICIPANT_MAPPING = {}
+# Add new tracking for socket-based interaction counts
+SOCKET_INTERACTION_LOGS = {}  # Track interactions per socket ID
 COMPUTE_BIAS_FOR_TYPES = [
     "mouseout_item",
+    "mouseover_item", 
     "mouseout_group",
+    "mouseover_group",
     "click_group",
     "click_add_item",
     "click_remove_item",
+    "click_item"
 ]
 
 SIO = socketio.AsyncServer(cors_allowed_origins='*')
@@ -106,7 +111,7 @@ async def on_save_logs(sid, data):
 
 @SIO.event
 async def on_interaction(sid, data):
-    app_mode = data["appMode"]  # The dataset that is being used, e.g. cars.csv
+    app_mode = data["appMode"]  # The dataset that is being used, e.g. synthetic_voters_v14.csv
     app_type = data["appType"]  # CONTROL / AWARENESS / ADMIN
     app_level = data["appLevel"]  # live / practice
     pid = data["participantId"]
@@ -116,6 +121,35 @@ async def on_interaction(sid, data):
     #   worst case scenario of random restart of the server.
     CLIENT_SOCKET_ID_PARTICIPANT_MAPPING[sid] = pid
     CLIENT_PARTICIPANT_ID_SOCKET_ID_MAPPING[pid] = sid
+
+    # Initialize socket-based interaction tracking
+    if sid not in SOCKET_INTERACTION_LOGS:
+        SOCKET_INTERACTION_LOGS[sid] = {
+            "app_mode": app_mode,
+            "app_type": app_type,
+            "app_level": app_level,
+            "participant_id": pid,
+            "interaction_count": 0,
+            "bias_logs": []
+        }
+        # Reset participant logs for new session
+        if pid in CLIENTS:
+            CLIENTS[pid]["bias_logs"] = []
+            CLIENTS[pid]["response_list"] = []
+    else:
+        # Check if this is a new session (same socket but different app_mode/app_level)
+        current_session = SOCKET_INTERACTION_LOGS[sid]
+        if app_mode != current_session["app_mode"] or app_level != current_session["app_level"]:
+            # Update session info and reset counts
+            SOCKET_INTERACTION_LOGS[sid]["app_mode"] = app_mode
+            SOCKET_INTERACTION_LOGS[sid]["app_type"] = app_type
+            SOCKET_INTERACTION_LOGS[sid]["app_level"] = app_level
+            SOCKET_INTERACTION_LOGS[sid]["bias_logs"] = []
+            SOCKET_INTERACTION_LOGS[sid]["interaction_count"] = 0
+            # Reset participant logs for session change
+            if pid in CLIENTS:
+                CLIENTS[pid]["bias_logs"] = []
+                CLIENTS[pid]["response_list"] = []
 
     if pid not in CLIENTS:
         # new participant => establish data mapping for them!
@@ -129,14 +163,11 @@ async def on_interaction(sid, data):
         CLIENTS[pid]["bias_logs"] = []
         CLIENTS[pid]["response_list"] = []
 
+    # Update participant info if needed (but don't reset logs here - handled in socket initialization)
     if app_mode != CLIENTS[pid]["app_mode"] or app_level != CLIENTS[pid]["app_level"]:
-        # datasets have been switched => reset the logs array!
-        # OR
-        # app_level (e.g. practice > live) is changed but same dataset is in use => reset the logs array!
         CLIENTS[pid]["app_mode"] = app_mode
         CLIENTS[pid]["app_level"] = app_level
-        CLIENTS[pid]["bias_logs"] = []
-        CLIENTS[pid]["response_list"] = []
+        # Note: Log reset is handled in socket initialization above
 
     # record response to interaction
     response = {}
@@ -152,15 +183,97 @@ async def on_interaction(sid, data):
     # check whether to compute bias metrics or not
     if interaction_type in COMPUTE_BIAS_FOR_TYPES:
         CLIENTS[pid]["bias_logs"].append(data)
-        metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
-        response["output_data"] = metrics
+        # Track interactions per socket ID for threshold checking
+        SOCKET_INTERACTION_LOGS[sid]["bias_logs"].append(data)
+        SOCKET_INTERACTION_LOGS[sid]["interaction_count"] += 1
         
-            # Create simplified interaction data
+        # Use participant-based logs for bias computation (original Lumos approach)
+        metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
+        
+        # For individual point interactions, only send back the updated point
+        if interaction_type in ["mouseover_item", "mouseout_item", "click_item", "mouseover_group", "mouseout_group", "click_group"] and "data" in data and "id" in data["data"]:
+            point_id = data["data"]["id"]
+            
+            # Check if this is a bar chart interaction by looking at the chart type or interaction type
+            is_bar_chart_interaction = data.get("chartType") == "barchart" or interaction_type in ["mouseover_group", "mouseout_group", "click_group"]
+            
+            # Check if we have enough interactions for THIS SOCKET to show bias data
+            socket_interaction_count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
+            has_enough_interactions = socket_interaction_count >= 20  # MIN_LOG_NUM
+            
+            if isinstance(point_id, list) or is_bar_chart_interaction:
+                # BAR CHART: Send back only the points in the interacted bar
+                if "data_point_distribution" in metrics and len(metrics["data_point_distribution"]) > 1:
+                    all_counts = metrics["data_point_distribution"][1]["counts"]
+                    
+                    # For bar chart interactions, we should always have a list of point IDs
+                    if isinstance(point_id, list):
+                        # point_id is already the array of points in the bar
+                        bar_points = {}
+                        for pid in point_id:
+                            if pid in all_counts:
+                                bar_points[pid] = all_counts[pid]
+                    else:
+                        # This shouldn't happen for bar chart interactions, but just in case
+                        bar_points = {}
+                        if point_id in all_counts:
+                            bar_points[point_id] = all_counts[point_id]
+                    
+                    modified_metrics = {
+                        "data_point_coverage": metrics["data_point_coverage"],
+                        "data_point_distribution": [
+                            metrics["data_point_distribution"][0],  # Keep the metric value
+                            {"counts": bar_points}  # Only the points in this bar
+                        ]
+                    }
+                    
+                    # Only include attribute data if THIS SOCKET has enough interactions
+                    if has_enough_interactions:
+                        modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
+                        modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
+                    
+                    response["output_data"] = modified_metrics
+                else:
+                    response["output_data"] = metrics
+            else:
+                # SCATTER PLOT: Only send back the specific point
+                if "data_point_distribution" in metrics and len(metrics["data_point_distribution"]) > 1:
+                    all_counts = metrics["data_point_distribution"][1]["counts"]
+                    if point_id in all_counts:
+                        # Create a modified response with only the updated point
+                        modified_metrics = {
+                            "data_point_coverage": metrics["data_point_coverage"],
+                            "data_point_distribution": [
+                                metrics["data_point_distribution"][0],  # Keep the metric value
+                                {"counts": {point_id: all_counts[point_id]}}  # Only the updated point
+                            ]
+                        }
+                        
+                        # Only include attribute data if THIS SOCKET has enough interactions
+                        if has_enough_interactions:
+                            modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
+                            modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
+                        
+                        response["output_data"] = modified_metrics
+                    else:
+                        response["output_data"] = metrics
+                else:
+                    response["output_data"] = metrics
+        else:
+            response["output_data"] = metrics
+        
+    # Send response back to the client
+    try:
+        await SIO.emit("interaction_response", response, room=sid)
+    except Exception as e:
+        pass
+        
+    # Create simplified interaction data
     simplified_data = {
         "participant_id": pid,
         "interaction_type": interaction_type,
         "interacted_value": data["data"],
-        "group": "socratic",
+        "group": data.get("group"),  # Read from frontend, default to "interaction_trace"
         "timestamp": data["interactionAt"]
     }
     try:
@@ -193,6 +306,7 @@ async def receive_external_question(sid, question_data):
     try:
         db.collection('questions').add(formatted_question)
     except Exception as e:
+        pass
         pass
     
     # Simple broadcast to all clients except sender

@@ -18,7 +18,7 @@ from scipy.stats import ks_2samp
 import bias_util
 
 NUM_QUANTILES = 4
-MIN_LOG_NUM = 10
+MIN_LOG_NUM = 20  # Increased from 10 to 20 to prevent early bias computation
 DATA_MAP = {
     "credit_risk.csv": {
         "attributes": [],
@@ -75,6 +75,20 @@ DATA_MAP = {
         ],
         "data": {},
     },
+    "tutorial_dataset_movie.csv": {
+        "attributes": [],
+        "distribution": {},
+        "numerical_attributes": [
+            "Worldwide Gross",
+            "Production Budget",
+            "Release Year",
+            "Running Time",
+            "Rotten Tomatoes Rating",
+            "IMDB Rating",
+            "Profit Ratio"
+        ],
+        "data": {},
+    },
     "euro.csv": {
         "attributes": [],
         "distribution": {},
@@ -111,13 +125,14 @@ DATA_MAP = {
         ],
         "data": {},
     },
-
     "synthetic_voters_v14.csv": {
         "attributes": [],
         "distribution": {},
         "numerical_attributes": [
             "age",
-            "income"
+            "abortion_view",
+            "gun_control_view",
+            "immigration_view"
         ],
         "data": {},
     },
@@ -158,8 +173,16 @@ def read_data(filename):
         reader = csv.DictReader(csvfile, delimiter=",", quotechar='"')
         dataset["attributes"] = reader.fieldnames
         for row in reader:
-            # Handle both 'id' and 'voter_id' cases
-            id_field = "voter_id" if "voter_id" in row else "id"
+            # Handle different ID field cases
+            if filename == "tutorial_dataset_movie.csv":
+                id_field = "Title"
+            elif filename == "synthetic_voters_v14.csv":
+                id_field = "voter_id"
+            elif "voter_id" in row:
+                id_field = "voter_id"
+            else:
+                id_field = "id"
+            
             data[row[id_field]] = {}  # store data in data dict
             for attr in row:
                 if attr in dataset["numerical_attributes"]:
@@ -276,19 +299,21 @@ def data_point_distribution(logs, active_data):
     for log in logs:
         if "data" in log and "id" in log["data"]:
             if isinstance(log["data"]["id"], list):
+                # For aggregate interactions (bar/line charts), increment all points in the group
                 agg_size = len(log["data"]["id"])
                 # print(log["data"]["id"])
                 for _id in log["data"]["id"]:
-                    # increment by fractional aggregate value
+                    # increment by fractional aggregate value for bias computation
                     log_counter += 1.0 / agg_size
-                    # Comment out the below line IFF Interaction with a
-                    #   group / aggregation (e.g., bar, line, dot) should not
-                    #   be considered as an interaction with individual points.
-                    #   No need to increment this counter.
-                    dpd_details["counts"][_id] += 1.0 / agg_size
+                    # For visualization, give each point +1 when bar is clicked
+                    if _id in dpd_details["counts"]:
+                        dpd_details["counts"][_id] += 1  # Changed from 1.0 / agg_size to 1
             else:
+                # For individual point interactions (scatter plot), only increment the specific point
                 log_counter += 1
-                dpd_details["counts"][log["data"]["id"]] += 1
+                _id = log["data"]["id"]
+                if _id in dpd_details["counts"]:
+                    dpd_details["counts"][_id] += 1
 
     # construct an array of expected values and an array of observed values
     expected = 1.0 * log_counter / len(active_data)
@@ -296,22 +321,49 @@ def data_point_distribution(logs, active_data):
     obs_arr = [dpd_details["counts"][item] for item in active_data]
 
     # compute chi square result and dpd metric
-    chi_squared_result = chisquare(obs_arr, f_exp=exp_arr)
-    if len(logs) < MIN_LOG_NUM:
-        dpd_metric = 0
-    else:
-        dpd_metric = float(f"{1 - chi_squared_result[1]:.4f}")
+    # Ensure the sums match for chi-square test
+    obs_sum = sum(obs_arr)
+    exp_sum = sum(exp_arr)
+    
+    # Normalize observed values to match expected sum
+    if obs_sum > 0 and exp_sum > 0:
+        normalization_factor = exp_sum / obs_sum
+        obs_arr = [obs * normalization_factor for obs in obs_arr]
+    
+    try:
+        chi_squared_result = chisquare(obs_arr, f_exp=exp_arr)
+        if len(logs) < MIN_LOG_NUM:
+            dpd_metric = 0
+        else:
+            dpd_metric = float(f"{1 - chi_squared_result[1]:.4f}")
+    except ValueError as e:
+        print(f"Warning: Chi-square test failed: {e}")
+        # Fallback: use a simple distribution metric
+        if len(logs) < MIN_LOG_NUM:
+            dpd_metric = 0
+        else:
+            # Calculate a simple distribution bias metric
+            max_obs = max(obs_arr) if obs_arr else 0
+            min_obs = min(obs_arr) if obs_arr else 0
+            if max_obs > 0:
+                dpd_metric = float(f"{(max_obs - min_obs) / max_obs:.4f}")
+            else:
+                dpd_metric = 0
 
     # record meta data for dpd calculation
     dpd_details["total_num_logs"] = len(logs)
     dpd_details["k(num_dp_logs)"] = log_counter
     dpd_details["expected_per_dp"] = expected
     dpd_details["degrees_of_freedom"] = len(active_data) - 1
-    dpd_details["chi_squared"] = chi_squared_result[0]
-    if str(chi_squared_result[1]) == "nan":
-        dpd_details["p_value"] = None
+    if 'chi_squared_result' in locals():
+        dpd_details["chi_squared"] = chi_squared_result[0]
+        if str(chi_squared_result[1]) == "nan":
+            dpd_details["p_value"] = None
+        else:
+            dpd_details["p_value"] = chi_squared_result[1]
     else:
-        dpd_details["p_value"] = chi_squared_result[1]
+        dpd_details["chi_squared"] = None
+        dpd_details["p_value"] = None
 
     return dpd_metric, dpd_details
 
@@ -361,8 +413,19 @@ def attribute_coverage(logs, active_data, active_attrs, active_attr_distr):
                             val_list.append(active_data[pid][attr])
 
                     if attr in DATA_MAP[log["appMode"]]["numerical_attributes"]:
-                        # take the median value
-                        val = statistics.median(val_list)
+                        # take the median value - ensure values are numbers
+                        try:
+                            # Convert string values to numbers if needed
+                            numeric_vals = []
+                            for v in val_list:
+                                if isinstance(v, str):
+                                    numeric_vals.append(bias_util.cast_to_num(v))
+                                else:
+                                    numeric_vals.append(v)
+                            val = statistics.median(numeric_vals)
+                        except (ValueError, TypeError):
+                            # If conversion fails, use the first value as fallback
+                            val = val_list[0] if val_list else 0
                     else:
                         try:
                             # use the most common categorical value
@@ -510,11 +573,25 @@ def attribute_distribution(logs, active_data, active_attrs, active_attr_distr, a
                     obs_arr.append(0)
 
             # compute chi square result and ad metric
-            chi_squared_result = chisquare(obs_arr, f_exp=exp_arr)
-            if len(logs) < MIN_LOG_NUM:
-                ad_metric[attr] = 0
-            else:
-                ad_metric[attr] = float(f"{1 - chi_squared_result[1]:.4f}")
+            try:
+                chi_squared_result = chisquare(obs_arr, f_exp=exp_arr)
+                if len(logs) < MIN_LOG_NUM:
+                    ad_metric[attr] = 0
+                else:
+                    ad_metric[attr] = float(f"{1 - chi_squared_result[1]:.4f}")
+            except ValueError as e:
+                print(f"Warning: Chi-square test failed for attribute {attr}: {e}")
+                # Fallback: use a simple distribution metric
+                if len(logs) < MIN_LOG_NUM:
+                    ad_metric[attr] = 0
+                else:
+                    # Calculate a simple distribution bias metric
+                    max_obs = max(obs_arr) if obs_arr else 0
+                    min_obs = min(obs_arr) if obs_arr else 0
+                    if max_obs > 0:
+                        ad_metric[attr] = float(f"{(max_obs - min_obs) / max_obs:.4f}")
+                    else:
+                        ad_metric[attr] = 0
 
             # record meta data for ad calculation
             try:
@@ -524,11 +601,15 @@ def attribute_distribution(logs, active_data, active_attrs, active_attr_distr, a
             ad_details[attr]["interaction_distr"] = user_distr_flat
             ad_details[attr]["interaction_distr_dict"] = user_distr
             ad_details[attr]["k(num_dp_logs)"] = log_counter
-            ad_details[attr]["chi_squared"] = chi_squared_result[0]
-            if str(chi_squared_result[1]) == "nan":
-                ad_details[attr]["p_value"] = None
+            if 'chi_squared_result' in locals():
+                ad_details[attr]["chi_squared"] = chi_squared_result[0]
+                if str(chi_squared_result[1]) == "nan":
+                    ad_details[attr]["p_value"] = None
+                else:
+                    ad_details[attr]["p_value"] = chi_squared_result[1]
             else:
-                ad_details[attr]["p_value"] = chi_squared_result[1]
+                ad_details[attr]["chi_squared"] = None
+                ad_details[attr]["p_value"] = None
 
     return ad_metric, ad_details
 

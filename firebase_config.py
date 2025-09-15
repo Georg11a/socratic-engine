@@ -6,18 +6,19 @@ from firebase_admin import firestore
 
 # Get Firebase credentials from environment variable
 firebase_credentials = os.getenv('FIREBASE_CREDENTIALS')
-if not firebase_credentials:
-    raise ValueError("FIREBASE_CREDENTIALS environment variable is not set")
 
-# Parse the credentials JSON string
-cred_dict = json.loads(firebase_credentials)
-cred = credentials.Certificate(cred_dict)
-
-# Initialize Firebase
-firebase_admin.initialize_app(cred)
-
-# Get Firestore client
-db = firestore.client()
+if firebase_credentials:
+    # Parse the credentials JSON string
+    cred_dict = json.loads(firebase_credentials)
+    cred = credentials.Certificate(cred_dict)
+    # Initialize Firebase
+    firebase_admin.initialize_app(cred)
+    # Get Firestore client
+    db = firestore.client()
+else:
+    # For development without Firebase
+    print("Warning: FIREBASE_CREDENTIALS not set. Firebase functionality will be disabled.")
+    db = None
 
 # Define the schema for questions collection
 questions_schema = {
