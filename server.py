@@ -266,7 +266,9 @@ async def on_interaction(sid, data):
     try:
         await SIO.emit("interaction_response", response, room=sid)
     except Exception as e:
-        pass
+        print(f"ERROR sending interaction_response: {e}")
+        import traceback
+        traceback.print_exc()
         
     # Create simplified interaction data
     simplified_data = {
@@ -280,7 +282,9 @@ async def on_interaction(sid, data):
         # Store in Firestore
         db.collection('interactions').add(simplified_data)
     except Exception as e:
-        pass
+        print(f"ERROR storing interaction in Firestore: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 
@@ -304,10 +308,12 @@ async def receive_external_question(sid, question_data):
     
     # Store in Firestore
     try:
+        # Store in Firestore
         db.collection('questions').add(formatted_question)
     except Exception as e:
-        pass
-        pass
+        print(f"ERROR storing question in Firestore: {e}")
+        import traceback
+        traceback.print_exc()
     
     # Simple broadcast to all clients except sender
     await SIO.emit(
@@ -331,7 +337,9 @@ async def on_question_response(sid, data):
         db.collection('responses').add(response)
         
     except Exception as e:
-        pass
+        print(f"ERROR storing response in Firestore: {e}")
+        import traceback
+        traceback.print_exc()
 
 @SIO.event
 async def on_insight(sid, data):
@@ -347,7 +355,9 @@ async def on_insight(sid, data):
         db.collection('insights').add(insight)
         
     except Exception as e:
-        pass
+        print(f"ERROR storing insight in Firestore: {e}")
+        import traceback
+        traceback.print_exc()
 
 @SIO.event
 async def recieve_interaction(sid, data):
@@ -365,7 +375,9 @@ async def recieve_interaction(sid, data):
         # Store in Firestore
         db.collection('interactions').add(simplified_data)
     except Exception as e:
-        pass
+        print(f"ERROR storing interaction in Firestore: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     bias.precompute_distributions()
