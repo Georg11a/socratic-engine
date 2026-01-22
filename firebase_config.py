@@ -20,18 +20,19 @@ else:
     print("Warning: FIREBASE_CREDENTIALS not set. Firebase functionality will be disabled.")
     db = None
 
-# Define the schema for questions collection
-questions_schema = {
-    "type": str,  # "question"
-    "id": str,    # unique question id
-    "text": str,  # question text
-    "timestamp": str  # ISO timestamp
+# Define the schema for insights collection
+insights_schema = {
+    "text": str,           # insight text
+    "timestamp": str,      # ISO timestamp
+    "group": str,          # group identifier
+    "participant_id": str  # user who provided insight
 }
 
-# Define the schema for responses collection
-responses_schema = {
-    "question_id": str,     # reference to question
-    "response": str,        # user's response text
-    "participant_id": str,  # user who responded
-    "timestamp": str        # ISO timestamp
+# Define the schema for interactions collection
+interactions_schema = {
+    "participant_id": str,     # user identifier
+    "interaction_type": str,   # type of interaction
+    "interacted_value": dict,  # interaction data
+    "group": str,             # group identifier
+    "timestamp": str          # ISO timestamp
 } 

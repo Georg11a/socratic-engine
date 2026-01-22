@@ -8,7 +8,6 @@ import numbers
 import os
 import random
 import statistics
-from datetime import datetime
 
 import scipy
 import sys
@@ -125,11 +124,27 @@ DATA_MAP = {
         ],
         "data": {},
     },
+    "tutorial_dataset_movie.csv": {
+        "attributes": [],
+        "distribution": {},
+        "numerical_attributes": [
+            "Worldwide Gross",
+            "Production Budget",
+            "Release Year",
+            "Running Time",
+            "Rotten Tomatoes Rating",
+            "IMDB Rating",
+            "Profit Ratio",
+            "Decade",
+        ],
+        "data": {},
+    },
     "synthetic_voters_v14.csv": {
         "attributes": [],
         "distribution": {},
         "numerical_attributes": [
             "age",
+            "income",
             "abortion_view",
             "gun_control_view",
             "immigration_view"
@@ -172,6 +187,19 @@ def read_data(filename):
         print(f"  reading data for {filename} ... ", end="", flush=True)
         reader = csv.DictReader(csvfile, delimiter=",", quotechar='"')
         dataset["attributes"] = reader.fieldnames
+        
+        # Determine the primary key field name
+        if "voter_id" in reader.fieldnames:
+            primary_key = "voter_id"
+        elif "id" in reader.fieldnames:
+            primary_key = "id"
+        elif "Title" in reader.fieldnames and filename == "tutorial_dataset_movie.csv":
+            # Special case for tutorial dataset that uses Title as primary key
+            primary_key = "Title"
+        else:
+            # Use the first column as primary key if no id/voter_id column exists
+            primary_key = reader.fieldnames[0]
+        
         for row in reader:
             # Handle different ID field cases
             if filename == "tutorial_dataset_movie.csv":
@@ -186,9 +214,9 @@ def read_data(filename):
             data[row[id_field]] = {}  # store data in data dict
             for attr in row:
                 if attr in dataset["numerical_attributes"]:
-                    data[row[id_field]][attr] = bias_util.cast_to_num(row[attr])
+                    data[row[primary_key]][attr] = bias_util.cast_to_num(row[attr])
                 else:
-                    data[row[id_field]][attr] = str(row[attr])
+                    data[row[primary_key]][attr] = str(row[attr])
         print(f"done")
 
 
@@ -612,22 +640,3 @@ def attribute_distribution(logs, active_data, active_attrs, active_attr_distr, a
                 ad_details[attr]["p_value"] = None
 
     return ad_metric, ad_details
-
-
-def log_simplified_interaction(pid, interaction_type):
-    """
-    Logs a simplified interaction with only participant ID, interaction type, and timestamp.
-    
-    Args:
-        pid (str): Participant ID
-        interaction_type (str): Type of interaction
-    """
-    # Create simplified interaction data
-    interaction_data = {
-        "participant_id": pid,
-        "interaction_type": interaction_type,
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # Store in Firestore
-    db.collection('simplified_interactions').add(interaction_data)

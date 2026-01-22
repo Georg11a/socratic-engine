@@ -10,9 +10,9 @@ from aiohttp import web
 from aiohttp_index import IndexMiddleware
 from firebase_config import db  # Import the Firestore client
 from firebase_admin import credentials, firestore
+
 import bias
 import bias_util
-
 
 # Set the path for the Google Cloud Logging logger
 currdir = Path(__file__).parent.absolute()
@@ -117,6 +117,92 @@ async def on_save_logs(sid, data):
 
             # persist to disk
             df_to_save.to_csv(filename, sep="\t")
+
+@SIO.event
+async def on_insight(sid, data):
+    """Handle user insights from the frontend"""
+    print(f"[DEBUG] on_insight received: {data}")
+    
+    # Check if this is a special operation (delete, edit) or regular insight
+    operation_type = data.get("type", "create")
+    
+    if operation_type == "create":
+        # Regular insight creation
+        insight_text = data.get("text", "")
+        timestamp = data.get("timestamp", datetime.now().isoformat())
+        group = data.get("group", "interaction_trace")
+        participant_id = data.get("participantId", "")
+        
+        # Create insight document
+        insight = {
+            "text": insight_text,
+            "timestamp": timestamp,
+            "group": group,
+            "participant_id": participant_id,
+            "operation": "create"
+        }
+        
+        try:
+            # Store in Firestore
+            db.collection('insights').add(insight)
+            print(f"[DEBUG] Stored insight in Firestore: {insight}")
+            
+            # Send confirmation back to client
+            await SIO.emit("insight_saved", {"status": "success", "insight": insight}, room=sid)
+            
+        except Exception as e:
+            print(f"[DEBUG] Error storing insight: {e}")
+            await SIO.emit("insight_saved", {"status": "error", "message": str(e)}, room=sid)
+    
+    elif operation_type == "delete_insight":
+        # Handle insight deletion
+        participant_id = data.get("participantId", "")
+        index = data.get("index", -1)
+        timestamp = data.get("timestamp", datetime.now().isoformat())
+        
+        deletion_record = {
+            "participant_id": participant_id,
+            "index": index,
+            "timestamp": timestamp,
+            "operation": "delete"
+        }
+        
+        try:
+            # Store deletion record in Firestore
+            db.collection('insight_operations').add(deletion_record)
+            print(f"[DEBUG] Stored insight deletion in Firestore: {deletion_record}")
+            
+        except Exception as e:
+            print(f"[DEBUG] Error storing insight deletion: {e}")
+    
+    elif operation_type == "edit_insight":
+        # Handle insight editing
+        participant_id = data.get("participantId", "")
+        index = data.get("index", -1)
+        old_text = data.get("oldText", "")
+        new_text = data.get("newText", "")
+        timestamp = data.get("timestamp", datetime.now().isoformat())
+        
+        edit_record = {
+            "participant_id": participant_id,
+            "index": index,
+            "old_text": old_text,
+            "new_text": new_text,
+            "timestamp": timestamp,
+            "operation": "edit"
+        }
+        
+        try:
+            # Store edit record in Firestore
+            db.collection('insight_operations').add(edit_record)
+            print(f"[DEBUG] Stored insight edit in Firestore: {edit_record}")
+            
+        except Exception as e:
+            print(f"[DEBUG] Error storing insight edit: {e}")
+    
+    else:
+        print(f"[DEBUG] Unknown insight operation type: {operation_type}")
+        await SIO.emit("insight_saved", {"status": "error", "message": f"Unknown operation type: {operation_type}"}, room=sid)
 
 @SIO.event
 async def on_interaction(sid, data):
@@ -328,7 +414,11 @@ async def on_interaction(sid, data):
         import traceback
         traceback.print_exc()
 
+    # save response
+    CLIENTS[pid]["response_list"].append(response)
 
+    await SIO.emit("log", response)  # send this to all
+    await SIO.emit("interaction_response", response, room=sid)
 
 
 @SIO.event
@@ -401,28 +491,16 @@ async def on_insight(sid, data):
         import traceback
         traceback.print_exc()
 
+
 @SIO.event
 async def recieve_interaction(sid, data):
-    interaction_type = data["interactionType"] # Interaction type - eg. hover, click
-    pid = data["participantId"]
-
-    simplified_data = {
-        "participant_id": pid,
-        "interaction_type": interaction_type,
-        "interacted_value": data["data"],
-        "group": data["group"],
-        "timestamp": data["interactionAt"]
-    }
-    try:
-        # Store in Firestore
-        db.collection('interactions').add(simplified_data)
-    except Exception as e:
-        print(f"ERROR storing interaction in Firestore: {e}")
-        import traceback
-        traceback.print_exc()
+    """Handle interactions from the frontend (correct spelling)"""
+    print(f"[DEBUG] recieve_interaction received: {data}")
+    
+    # Forward to the on_interaction handler
+    await on_interaction(sid, data)
 
 if __name__ == "__main__":
     bias.precompute_distributions()
     port = int(os.environ.get("PORT", 3000))
     web.run_app(APP, port=port)
-

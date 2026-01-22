@@ -36,4 +36,3 @@ This folder contains the Lumos backend code. It computes Wall et al.'s \[1\] met
 
 ### References
 \[1\] - Wall, Emily, et al. "Warning, bias may occur: A proposed approach to detecting cognitive bias in interactive visual analytics." 2017 IEEE Conference on Visual Analytics Science and Technology (VAST). IEEE, 2017.
-# socratic-server
