@@ -52,9 +52,18 @@ async def handle_ui_files(request):
     file_path = os.path.join(public_dir, fname)
 
     try:
-        return web.FileResponse(file_path)
-    except FileNotFoundError:
-        raise web.HTTPNotFound()
+        if os.path.exists(file_path):
+            return web.FileResponse(file_path)
+        else:
+            # For missing files, return 404 instead of crashing
+            print(f"File not found: {file_path}")
+            if fname == 'index.html':
+                return web.Response(status=404, text="Application not found")
+            else:
+                return web.Response(status=404, text=f"File not found: {fname}")
+    except Exception as e:
+        print(f"Error serving file {fname}: {e}")
+        return web.Response(status=500, text="Internal server error")
 
 # Static file serving
 APP.router.add_static('/static/', path=str(os.path.join(os.path.dirname(__file__), 'public')), name='static')
@@ -172,6 +181,7 @@ async def on_interaction(sid, data):
     # record response to interaction
     response = {}
     response["sid"] = sid
+    response["interactionId"] = data.get("interactionId")  # Include interaction ID for tracking
     response["participant_id"] = pid
     response["app_mode"] = app_mode
     response["app_type"] = app_type
@@ -181,14 +191,41 @@ async def on_interaction(sid, data):
     response["input_data"] = data
 
     # check whether to compute bias metrics or not
+    send_response = False
     if interaction_type in COMPUTE_BIAS_FOR_TYPES:
         CLIENTS[pid]["bias_logs"].append(data)
         # Track interactions per socket ID for threshold checking
         SOCKET_INTERACTION_LOGS[sid]["bias_logs"].append(data)
         SOCKET_INTERACTION_LOGS[sid]["interaction_count"] += 1
         
-        # Use participant-based logs for bias computation (original Lumos approach)
-        metrics = bias.compute_metrics(app_mode, CLIENTS[pid]["bias_logs"])
+        # Check if we have enough interactions for THIS SOCKET to show bias data
+        socket_interaction_count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
+        has_enough_interactions = socket_interaction_count >= 20  # MIN_LOG_NUM
+        
+        # Only compute bias metrics if we have enough interactions
+        if has_enough_interactions:
+            try:
+                # Use participant-based logs for bias computation (original Lumos approach)
+                # Run bias computation asynchronously to prevent blocking
+                import asyncio
+                loop = asyncio.get_event_loop()
+                metrics = await loop.run_in_executor(None, bias.compute_metrics, app_mode, CLIENTS[pid]["bias_logs"])
+            except Exception as e:
+                print(f"ERROR computing bias metrics: {e}")
+                import traceback
+                traceback.print_exc()
+                # Send empty response to prevent client timeout
+                response["output_data"] = {}
+                await SIO.emit("interaction_response", response, room=sid)
+                return
+        else:
+            # Send minimal response for early interactions
+            metrics = {
+                "data_point_distribution": [0, {"counts": {}}],
+                "attribute_distribution": [{}, {}],
+                "data_point_coverage": [{}, {}],
+                "attribute_coverage": [{}, {}]
+            }
         
         # For individual point interactions, only send back the updated point
         if interaction_type in ["mouseover_item", "mouseout_item", "click_item", "mouseover_group", "mouseout_group", "click_group"] and "data" in data and "id" in data["data"]:
@@ -197,9 +234,8 @@ async def on_interaction(sid, data):
             # Check if this is a bar chart interaction by looking at the chart type or interaction type
             is_bar_chart_interaction = data.get("chartType") == "barchart" or interaction_type in ["mouseover_group", "mouseout_group", "click_group"]
             
-            # Check if we have enough interactions for THIS SOCKET to show bias data
-            socket_interaction_count = SOCKET_INTERACTION_LOGS[sid]["interaction_count"]
-            has_enough_interactions = socket_interaction_count >= 20  # MIN_LOG_NUM
+            # Always send response for point interactions
+            send_response = True
             
             if isinstance(point_id, list) or is_bar_chart_interaction:
                 # BAR CHART: Send back only the points in the interacted bar
@@ -227,7 +263,7 @@ async def on_interaction(sid, data):
                         ]
                     }
                     
-                    # Only include attribute data if THIS SOCKET has enough interactions
+                    # Include attribute data if we have enough interactions
                     if has_enough_interactions:
                         modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
                         modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
@@ -249,7 +285,7 @@ async def on_interaction(sid, data):
                             ]
                         }
                         
-                        # Only include attribute data if THIS SOCKET has enough interactions
+                        # Include attribute data if we have enough interactions
                         if has_enough_interactions:
                             modified_metrics["attribute_coverage"] = metrics["attribute_coverage"]
                             modified_metrics["attribute_distribution"] = metrics["attribute_distribution"]
@@ -260,15 +296,18 @@ async def on_interaction(sid, data):
                 else:
                     response["output_data"] = metrics
         else:
+            # For non-point interactions, always send response if bias computation is enabled
+            send_response = True
             response["output_data"] = metrics
         
-    # Send response back to the client
-    try:
-        await SIO.emit("interaction_response", response, room=sid)
-    except Exception as e:
-        print(f"ERROR sending interaction_response: {e}")
-        import traceback
-        traceback.print_exc()
+    # Only send response back to the client if we have meaningful data
+    if send_response:
+        try:
+            await SIO.emit("interaction_response", response, room=sid)
+        except Exception as e:
+            print(f"ERROR sending interaction_response: {e}")
+            import traceback
+            traceback.print_exc()
         
     # Create simplified interaction data
     simplified_data = {
@@ -279,8 +318,11 @@ async def on_interaction(sid, data):
         "timestamp": data["interactionAt"]
     }
     try:
-        # Store in Firestore
-        db.collection('interactions').add(simplified_data)
+        # Store in Firestore only if db is available
+        if db is not None:
+            db.collection('interactions').add(simplified_data)
+        else:
+            print("WARNING: Firestore not configured, skipping interaction storage")
     except Exception as e:
         print(f"ERROR storing interaction in Firestore: {e}")
         import traceback
