@@ -14,6 +14,23 @@ from firebase_admin import credentials, firestore
 import bias
 import bias_util
 
+# === Socratic Engine Integration ===
+import json
+from engine.socratic_engine import SocraticEngine
+
+# Initializing Socratic Engine
+print("Initializing Socratic Engine...")
+with open('config/question_triggers_config.json', 'r') as f:
+    SOCRATIC_CONFIG = json.load(f)
+
+SOCRATIC_ENGINE = SocraticEngine(
+    SOCRATIC_CONFIG,
+    groq_api_key=os.environ.get('GROQ_API_KEY')  
+)
+
+USER_INTERACTION_HISTORY = {}
+print("✓ Socratic Engine initialized successfully\n")
+
 # Set the path for the Google Cloud Logging logger
 currdir = Path(__file__).parent.absolute()
 
@@ -420,6 +437,125 @@ async def on_interaction(sid, data):
     await SIO.emit("log", response)  # send this to all
     await SIO.emit("interaction_response", response, room=sid)
 
+    # ========== Socratic Question Auto-Trigger ==========
+    if SOCRATIC_ENGINE:  # Only execute if engine initialized successfully
+        try:
+            user_id = data.get("participantId") or sid
+            
+            # Initialize user interaction history
+            if user_id not in USER_INTERACTION_HISTORY:
+                USER_INTERACTION_HISTORY[user_id] = []
+                print(f"\n[SOCRATIC] New user session: {user_id}")
+            
+            # Add current interaction to history
+            USER_INTERACTION_HISTORY[user_id].append(data)
+            
+            # === Detailed debugging ===
+            history_len = len(USER_INTERACTION_HISTORY[user_id])
+            interaction_type = data.get('interactionType')
+            print(f"[SOCRATIC] User: {user_id[:8]}... | Step: {history_len} | Type: {interaction_type}")
+            
+            # Build current context from interaction data
+            current_context = {
+                'x_attribute': data.get('x_attribute'),
+                'y_attribute': data.get('y_attribute'),
+                'chart_type': data.get('chart_changed'),
+                'filters_active': []
+            }
+            
+            # Process interaction and check if question should be triggered
+            result = await SOCRATIC_ENGINE.process_interaction(
+                user_id,
+                data,
+                current_context
+            )
+            
+            # If a question was triggered, send it to the frontend
+            if result.get('should_ask'):
+                question_payload = {
+                    'questionId': f"auto_{datetime.now().timestamp()}",
+                    'category': result['category'],
+                    'question': result['question'],
+                    'method': result['method'],
+                    'triggerDetails': result.get('trigger_details', {}),
+                    'sessionInfo': result.get('session_info', {})
+                }
+                
+                # Emit question to frontend via Socket.IO
+                await SIO.emit('socratic_question_triggered', question_payload, room=sid)
+                
+                print(f"\n{'='*60}")
+                print(f"✓ SOCRATIC QUESTION TRIGGERED!")
+                print(f"{'='*60}")
+                print(f"  User: {user_id}")
+                print(f"  Step: {history_len}")
+                print(f"  Category: {result['category']}")
+                print(f"  Question: {result['question'][:80]}...")
+                print(f"  Method: {result['method']}")
+                print(f"  Confidence: {result['trigger_details'].get('confidence', 0):.2f}")
+                print(f"{'='*60}\n")
+            else:
+                # Show status every 10 steps
+                if history_len % 10 == 0:
+                    print(f"[SOCRATIC] Step {history_len}: {result.get('reason', 'checking...')}")
+        
+        except Exception as e:
+            # Silent failure - don't break existing functionality
+            print(f"✗ Socratic Engine error: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # ========== Socratic Question Auto-Trigger ==========
+    if SOCRATIC_ENGINE:  # Only execute if engine initialized successfully
+        try:
+            user_id = data.get("participantId") or sid
+            
+            # Initialize user interaction history
+            if user_id not in USER_INTERACTION_HISTORY:
+                USER_INTERACTION_HISTORY[user_id] = []
+            
+            # Add current interaction to history
+            USER_INTERACTION_HISTORY[user_id].append(data)
+            
+            # Build current context from interaction data
+            current_context = {
+                'x_attribute': data.get('x_attribute'),
+                'y_attribute': data.get('y_attribute'),
+                'chart_type': data.get('chart_changed'),
+                'filters_active': []
+            }
+            
+            # Process interaction and check if question should be triggered
+            result = await SOCRATIC_ENGINE.process_interaction(
+                user_id,
+                data,
+                current_context
+            )
+            
+            # If a question was triggered, send it to the frontend
+            if result.get('should_ask'):
+                question_payload = {
+                    'questionId': f"auto_{datetime.now().timestamp()}",
+                    'category': result['category'],
+                    'question': result['question'],
+                    'method': result['method'],
+                    'triggerDetails': result.get('trigger_details', {}),
+                    'sessionInfo': result.get('session_info', {})
+                }
+                
+                # Emit question to frontend via Socket.IO
+                await SIO.emit('socratic_question_triggered', question_payload, room=sid)
+                
+                print(f"\n✓ Socratic Question Triggered:")
+                print(f"  User: {user_id}")
+                print(f"  Category: {result['category']}")
+                print(f"  Question: {result['question'][:80]}...")
+                print(f"  Method: {result['method']}")
+        
+        except Exception as e:
+            # Silent failure - don't break existing functionality
+            print(f"✗ Socratic Engine error: {e}")
+
 
 @SIO.event
 async def receive_external_question(sid, question_data):
@@ -504,3 +640,5 @@ if __name__ == "__main__":
     bias.precompute_distributions()
     port = int(os.environ.get("PORT", 3000))
     web.run_app(APP, port=port)
+
+    

@@ -1,0 +1,641 @@
+{
+  "metadata": {
+    "version": "2.0",
+    "description": "Socratic Question Triggering Rules - Based on Real User Interaction Patterns",
+    "last_updated": "2026-02-03",
+    "cooldown_period": 20,
+    "question_categories": ["clarity", "precision", "accuracy", "relevance", "depth", "breadth"]
+  },
+
+  "triggers": {
+    
+    "clarity": {
+      "description": "Help users clarify their understanding and define clear analysis goals",
+      "priority": "high",
+      "conditions": [
+        {
+          "name": "early_aimless_exploration",
+          "description": "User is exploring without clear direction in early session",
+          "detection_rule": {
+            "interaction_count": {"min": 10, "max": 30},
+            "insight_count": 0,
+            "rapid_chart_changes": {"count": 5, "window": 10},
+            "no_sustained_focus": true
+          },
+          "question_template": "What specific question are you trying to answer with this dataset?",
+          "example_context": {
+            "sequence": 12,
+            "chart_changes": 6,
+            "axis_changes": 3,
+            "recent_actions": ["chart_type_changed", "chart_type_changed", "axis_attribute_changed"]
+          }
+        },
+        {
+          "name": "prolonged_exploration_no_insights",
+          "description": "User has explored extensively but hasn't recorded any insights",
+          "detection_rule": {
+            "interaction_count": {"min": 60, "max": 100},
+            "insight_count": 0,
+            "mouseover_count_last_20": {"min": 8},
+            "diverse_interactions": true
+          },
+          "question_template": "You've been exploring {x_attribute} and {y_attribute} for a while. What specific question are you trying to answer with this dataset?",
+          "example_context": {
+            "sequence": 74,
+            "mouseover_count": 10,
+            "filter_usage": 9,
+            "x_attribute": "party",
+            "y_attribute": "immigration_view"
+          }
+        },
+        {
+          "name": "focused_attribute_without_goal",
+          "description": "User keeps examining same attribute without clear purpose",
+          "detection_rule": {
+            "same_x_attribute_steps": {"min": 20},
+            "insight_count": {"max": 2},
+            "interaction_count": {"min": 30},
+            "recent_axis_changes": {"count": 8, "window": 15}
+          },
+          "question_template": "What specific question are you trying to answer with exploring {x_attribute}?",
+          "example_context": {
+            "sequence": 286,
+            "x_attribute": "abortion_view",
+            "axis_changes_recent": 12,
+            "steps_since_last_insight": 80
+          }
+        },
+        {
+          "name": "vague_insight_detected",
+          "description": "User saved an insight with vague language",
+          "detection_rule": {
+            "last_insight_contains": ["generally", "seems", "appears", "kind of", "somewhat", "roughly", "tend to"],
+            "last_insight_length": {"max": 80},
+            "no_specific_values": true,
+            "steps_since_insight": {"max": 5}
+          },
+          "question_template": "You mentioned that {vague_phrase}. What do you mean by this insight? Can you clarify your interpretation?",
+          "example_context": {
+            "last_insight": "Independents generally align more with Republicans",
+            "vague_words": ["generally"]
+          }
+        },
+        {
+          "name": "rapid_attribute_switching",
+          "description": "User is rapidly switching attributes without focus",
+          "detection_rule": {
+            "axis_changes_last_10": {"min": 6},
+            "unique_attributes_last_10": {"min": 5},
+            "no_insight_in_window": true,
+            "chart_stable": true
+          },
+          "question_template": "You've been exploring {attribute_list}. What pattern or relationship are you hoping to discover?",
+          "example_context": {
+            "sequence": 20,
+            "recent_attributes": ["gender", "income", "party", "age", "gun_control_view"],
+            "axis_changes": 6
+          }
+        }
+      ]
+    },
+
+    "precision": {
+      "description": "Encourage users to be specific and detailed in their analysis",
+      "priority": "medium",
+      "conditions": [
+        {
+          "name": "repeated_mouseover_no_quantification",
+          "description": "User hovers over data points repeatedly without recording specific values",
+          "detection_rule": {
+            "mouseover_count_last_20": {"min": 8},
+            "insight_saved_last_20": false,
+            "unique_datapoints_examined": {"min": 3}
+          },
+          "question_template": "You've been examining {x_attribute}={point_x_value} and {y_attribute}={point_y_value}. What exact values or ranges are you referring to in this visualization?",
+          "example_context": {
+            "sequence": 30,
+            "mouseover_count": 8,
+            "last_points": [
+              {"x": "Republican", "y": -1.8},
+              {"x": "Democrat", "y": 1.3},
+              {"x": "Independent", "y": -0.2}
+            ]
+          }
+        },
+        {
+          "name": "general_statement_insight",
+          "description": "User saved an insight without specific numbers or ranges",
+          "detection_rule": {
+            "last_insight_no_numbers": true,
+            "last_insight_length": {"min": 40, "max": 100},
+            "contains_general_terms": ["split", "divided", "difference", "higher", "lower"],
+            "steps_since_insight": {"max": 10}
+          },
+          "question_template": "You mentioned '{insight_summary}'. Can you be more specific about the trend you're seeing? What exact values are you comparing?",
+          "example_context": {
+            "last_insight": "Men and women are significantly split",
+            "general_terms": ["split", "significantly"]
+          }
+        },
+        {
+          "name": "comparative_statement_without_values",
+          "description": "User makes comparisons without quantifying the difference",
+          "detection_rule": {
+            "last_insight_contains": ["more than", "less than", "higher", "lower", "greater", "smaller"],
+            "last_insight_no_numbers": true,
+            "steps_since_insight": {"max": 8}
+          },
+          "question_template": "When you say '{comparative_phrase}', can you quantify this difference? What are the specific values you're comparing?",
+          "example_context": {
+            "last_insight": "Women are more supportive of gun control than men",
+            "comparative_terms": ["more supportive", "than"]
+          }
+        },
+        {
+          "name": "pattern_observation_without_detail",
+          "description": "User notes a pattern but doesn't specify the details",
+          "detection_rule": {
+            "last_insight_contains": ["pattern", "trend", "relationship", "correlation"],
+            "last_insight_length": {"max": 60},
+            "no_specific_attributes_mentioned": true
+          },
+          "question_template": "Can you give more details on your analysis process? What specific aspects of {x_attribute} and {y_attribute} show this pattern?",
+          "example_context": {
+            "last_insight": "There's an interesting pattern here",
+            "x_attribute": "income",
+            "y_attribute": "immigration_view"
+          }
+        }
+      ]
+    },
+
+    "accuracy": {
+      "description": "Encourage users to verify correctness of their interpretations",
+      "priority": "low",
+      "conditions": [
+        {
+          "name": "insight_without_recent_evidence",
+          "description": "User saved insight but hasn't examined data recently",
+          "detection_rule": {
+            "insight_saved": true,
+            "steps_since_insight": {"min": 15, "max": 50},
+            "no_mouseover_after_insight": 10,
+            "no_axis_change_after_insight": true
+          },
+          "question_template": "What evidence from the visualization supports your claim about {insight_topic}?",
+          "example_context": {
+            "sequence": 110,
+            "steps_since_insight": 40,
+            "last_insight": "democrats generally have a higher income",
+            "mouseover_after_insight": 9
+          }
+        },
+        {
+          "name": "contradictory_observations",
+          "description": "User's insight might conflict with data they've examined",
+          "detection_rule": {
+            "insight_saved": true,
+            "mouseover_count_after_insight": {"min": 6},
+            "different_values_examined": true,
+            "steps_since_insight": {"min": 20, "max": 60}
+          },
+          "question_template": "Is there any piece of evidence that might contradict or complicate that conclusion about {insight_topic}?",
+          "example_context": {
+            "sequence": 110,
+            "last_insight": "democrats have higher income and unfavourable attitude towards immigration",
+            "subsequent_mouseover_count": 9,
+            "steps_since_insight": 40
+          }
+        },
+        {
+          "name": "generalization_from_limited_exploration",
+          "description": "User made broad claim after exploring limited subset",
+          "detection_rule": {
+            "insight_saved": true,
+            "filter_active": true,
+            "no_filter_variation_after": true,
+            "insight_contains_generalizations": ["all", "every", "always", "never", "none"]
+          },
+          "question_template": "You found that {insight_summary} while filters are active. Does this pattern hold across the full dataset?",
+          "example_context": {
+            "insight": "All Republicans oppose gun control",
+            "active_filters": ["age: 18-30", "location: urban"],
+            "generalization_terms": ["all"]
+          }
+        },
+        {
+          "name": "conclusion_without_cross_validation",
+          "description": "User drew conclusion without exploring alternative views",
+          "detection_rule": {
+            "insight_saved": true,
+            "same_chart_type_before_and_after": true,
+            "steps_since_insight": {"min": 15, "max": 40},
+            "no_alternative_viz_tried": true
+          },
+          "question_template": "Have you verified this finding using different visualization types? How confident are you in '{insight_summary}'?",
+          "example_context": {
+            "chart_type": "scatterplot",
+            "steps_with_same_chart": 35,
+            "last_insight": "Clear correlation between income and political views"
+          }
+        }
+      ]
+    },
+
+    "relevance": {
+      "description": "Help users focus on pertinent aspects and avoid tangential exploration",
+      "priority": "high",
+      "conditions": [
+        {
+          "name": "mechanical_attribute_combinations",
+          "description": "User is mechanically trying attribute combinations without purpose",
+          "detection_rule": {
+            "rapid_axis_changes": {"count": 10, "window": 15},
+            "no_insights_in_window": true,
+            "no_mouseover_in_window": true,
+            "attribute_pairs_tried": {"min": 5}
+          },
+          "question_template": "You've explored {attribute_list}. What story does this combination of attributes reveal about the data?",
+          "example_context": {
+            "sequence": 207,
+            "attributes_tried": ["party", "gun_control_view", "immigration_view", "abortion_view"],
+            "steps_without_insight": 206
+          }
+        },
+        {
+          "name": "lost_focus_after_insight",
+          "description": "User saved insight but subsequent exploration is unrelated",
+          "detection_rule": {
+            "insight_saved": true,
+            "steps_since_insight": {"min": 10, "max": 30},
+            "attributes_changed_completely": true,
+            "no_related_exploration": true
+          },
+          "question_template": "You found that {last_insight_summary}. How does your current exploration of {current_attributes} relate to this finding?",
+          "example_context": {
+            "last_insight": "Gender predicts gun control views",
+            "last_attributes": ["gender", "gun_control_view"],
+            "current_attributes": ["income", "last_year_voted"]
+          }
+        },
+        {
+          "name": "exploring_tangential_attributes",
+          "description": "User is exploring attributes not central to their stated goal",
+          "detection_rule": {
+            "interaction_count": {"min": 40},
+            "current_attributes_unrelated": true,
+            "response_to_previous_clarity_question": true,
+            "time_since_clarity_response": {"min": 20}
+          },
+          "question_template": "Earlier you mentioned wanting to understand {stated_goal}. How does exploring {current_x_attribute} and {current_y_attribute} help answer that question?",
+          "example_context": {
+            "stated_goal": "voting behavior patterns",
+            "current_attributes": ["income", "gender"],
+            "goal_relevant_attributes": ["party", "last_year_voted"]
+          }
+        },
+        {
+          "name": "most_important_insight_check",
+          "description": "User has multiple insights but hasn't identified the most important",
+          "detection_rule": {
+            "insight_count": {"min": 3},
+            "interaction_count": {"min": 100, "max": 250},
+            "diverse_topics_explored": true,
+            "no_synthesis_insight": true
+          },
+          "question_template": "You've discovered several patterns. What is the most important insight you've gained from this dataset so far?",
+          "example_context": {
+            "sequence": 200,
+            "insights_count": 3,
+            "topics": ["gender differences", "party alignment", "income effects"]
+          }
+        }
+      ]
+    },
+
+    "depth": {
+      "description": "Encourage users to explore underlying complexities and implications",
+      "priority": "medium",
+      "conditions": [
+        {
+          "name": "pattern_found_no_causal_analysis",
+          "description": "User found pattern but didn't explore potential causes",
+          "detection_rule": {
+            "insight_saved": true,
+            "steps_since_insight": {"min": 1, "max": 5},
+            "no_filter_usage_after": true,
+            "no_attribute_change_after": true,
+            "moved_to_different_analysis": true
+          },
+          "question_template": "What might be the reason behind this pattern you found about {insight_topic}?",
+          "example_context": {
+            "sequence": 91,
+            "last_insight": "Suburban voters split between urban and rural on three policies",
+            "steps_since_insight": 1,
+            "no_deeper_exploration": true
+          }
+        },
+        {
+          "name": "correlation_without_mechanism",
+          "description": "User found correlation but didn't explore mechanism",
+          "detection_rule": {
+            "insight_saved": true,
+            "insight_contains": ["correlation", "relationship", "link", "connection"],
+            "steps_since_insight": {"min": 20, "max": 60},
+            "no_third_variable_explored": true,
+            "same_two_attributes_focus": true
+          },
+          "question_template": "You found a link between {attribute_1} and {attribute_2}. What might be the underlying causes of this trend or pattern?",
+          "example_context": {
+            "sequence": 392,
+            "last_insight": "Women tend to be more supportive of gun control",
+            "attributes": ["gender", "gun_control_view"],
+            "steps_since_insight": 49
+          }
+        },
+        {
+          "name": "descriptive_finding_without_explanation",
+          "description": "User made descriptive observation without seeking explanation",
+          "detection_rule": {
+            "insight_saved": true,
+            "insight_is_descriptive": true,
+            "no_why_question_explored": true,
+            "steps_since_insight": {"min": 10, "max": 40}
+          },
+          "question_template": "You observed that {observation}. What factors might explain why this is the case?",
+          "example_context": {
+            "observation": "Higher income voters oppose immigration",
+            "no_causal_exploration": true,
+            "attributes_examined": ["income", "immigration_view"]
+          }
+        },
+        {
+          "name": "surface_pattern_no_segments",
+          "description": "User found overall pattern but didn't examine subgroups",
+          "detection_rule": {
+            "insight_saved": true,
+            "filter_count_total": {"max": 3},
+            "steps_since_insight": {"min": 15},
+            "no_segmentation_attempted": true,
+            "insight_about_aggregate": true
+          },
+          "question_template": "You found that {aggregate_finding}. Does this pattern hold true across different subgroups (e.g., age groups, income levels)?",
+          "example_context": {
+            "aggregate_finding": "Republicans oppose gun control",
+            "subgroups_not_explored": ["age", "income", "location"],
+            "filter_usage": 1
+          }
+        },
+        {
+          "name": "immediate_insight_after_save",
+          "description": "User immediately saved insight after minimal exploration",
+          "detection_rule": {
+            "insight_saved": true,
+            "steps_before_insight": {"max": 3},
+            "mouseover_before_insight": {"max": 2},
+            "chart_just_changed": true
+          },
+          "question_template": "What makes this analysis about {x_attribute} and {y_attribute} difficult or interesting? Have you explored edge cases?",
+          "example_context": {
+            "steps_before_insight": 2,
+            "insight": "Clear party differences on abortion",
+            "depth_explored": "minimal"
+          }
+        }
+      ]
+    },
+
+    "breadth": {
+      "description": "Prompt users to consider alternative perspectives and broader implications",
+      "priority": "medium",
+      "conditions": [
+        {
+          "name": "stuck_on_same_view_no_filters",
+          "description": "User examining same attributes without using filters",
+          "detection_rule": {
+            "same_x_attribute_last_n_steps": 25,
+            "same_y_attribute_last_n_steps": 25,
+            "filter_count_total": 0,
+            "interaction_count": {"min": 30},
+            "chart_changes_last_20": {"max": 2}
+          },
+          "question_template": "You've been exploring {x_attribute} and {y_attribute} for {n_steps} steps. Have you tried filtering the data to uncover more insights?",
+          "example_context": {
+            "sequence": 158,
+            "x_attribute": "party",
+            "y_attribute": "immigration_view",
+            "steps_on_same_view": 88,
+            "filter_usage": 2
+          }
+        },
+        {
+          "name": "no_chart_type_exploration",
+          "description": "User hasn't tried different visualization types",
+          "detection_rule": {
+            "same_chart_type_last_n_steps": 30,
+            "chart_type_changed_count_total": {"max": 2},
+            "interaction_count": {"min": 50},
+            "current_chart_type": "not_bar"
+          },
+          "question_template": "You haven't used a {unused_chart_type} yet; have you considered other visualization types that might reveal different patterns?",
+          "example_context": {
+            "sequence": 246,
+            "current_chart": "scatterplot",
+            "unused_charts": ["barchart", "linechart"],
+            "steps_with_same_chart": 40
+          }
+        },
+        {
+          "name": "deep_in_one_attribute_space",
+          "description": "User extensively explored one attribute space without breadth",
+          "detection_rule": {
+            "same_x_attribute_percentage": {"min": 0.7},
+            "interaction_count": {"min": 100},
+            "unique_attributes_examined": {"max": 4},
+            "total_attributes_available": {"min": 8}
+          },
+          "question_template": "You've focused heavily on {primary_attribute}. What pertinent alternative hypotheses or attributes (like {suggested_attributes}) have been looked at so far?",
+          "example_context": {
+            "primary_attribute": "party",
+            "percentage_on_primary": 75,
+            "suggested_alternatives": ["income", "location", "age"]
+          }
+        },
+        {
+          "name": "insights_without_alternative_explanations",
+          "description": "User has insights but hasn't considered alternative interpretations",
+          "detection_rule": {
+            "insight_count": {"min": 2},
+            "steps_since_last_insight": {"min": 30},
+            "no_contrasting_analysis": true,
+            "same_analytical_approach": true
+          },
+          "question_template": "You found that {primary_finding}. What other perspectives or interpretations could explain this trend?",
+          "example_context": {
+            "primary_finding": "Party predicts policy views",
+            "alternative_not_explored": "Could age or income also explain this?",
+            "steps_since_insight": 44
+          }
+        },
+        {
+          "name": "feature_underutilization",
+          "description": "User hasn't used key tool features that could help",
+          "detection_rule": {
+            "filter_count": 0,
+            "aggregation_count": 0,
+            "interaction_count": {"min": 40},
+            "insights_count": {"max": 2}
+          },
+          "question_template": "Have you considered alternative data attributes/visualizations that can help you solve the problem you are interested in?",
+          "example_context": {
+            "sequence": 389,
+            "unused_features": ["filters", "aggregations", "color encoding"],
+            "current_approach": "basic scatterplot only"
+          }
+        },
+        {
+          "name": "immediate_breadth_after_insight",
+          "description": "User saved insight, prompt for broader exploration immediately",
+          "detection_rule": {
+            "insight_saved": true,
+            "steps_since_insight": {"min": 1, "max": 3},
+            "insight_count_total": {"min": 3},
+            "many_attributes_unexplored": true
+          },
+          "question_template": "Great finding! Have you considered alternative data attributes/visualizations that can help you to solve the problem you are interested?",
+          "example_context": {
+            "sequence": 389,
+            "just_saved_insight": "Middle income voters constitute largest group",
+            "steps_since": 1,
+            "breadth_opportunities": ["age", "location", "race"]
+          }
+        },
+        {
+          "name": "repeated_filter_adjustments_same_attribute",
+          "description": "User keeps adjusting filters on same attribute without exploring others",
+          "detection_rule": {
+            "filter_changes_last_20": {"min": 10},
+            "unique_filtered_attributes": 1,
+            "no_new_attributes_explored": true,
+            "filter_count_total": {"min": 15}
+          },
+          "question_template": "You've been adjusting filters on {filtered_attribute} extensively. Have you explored how other attributes like {suggested_attributes} might provide additional insights?",
+          "example_context": {
+            "filtered_attribute": "last_year_voted",
+            "filter_adjustments": 15,
+            "suggested_attributes": ["age", "income", "location"]
+          }
+        }
+      ]
+    }
+  },
+
+  "feature_extraction_specs": {
+    "description": "Specifications for extracting features from user interaction history",
+    "features": {
+      "interaction_count": "Total number of interactions in session",
+      "insight_count": "Number of insights saved",
+      "steps_since_last_insight": "Number of interactions since last insight saved",
+      "last_insight": "Text of the most recent saved insight",
+      "mouseover_count_last_n": "Count of mouseover events in last N interactions",
+      "axis_changes_last_n": "Count of axis changes in last N interactions",
+      "chart_changes_last_n": "Count of chart type changes in last N interactions",
+      "filter_count_total": "Total number of filter operations",
+      "aggregation_count_total": "Total number of aggregation changes",
+      "same_x_attribute_last_n_steps": "Number of consecutive steps with same X attribute",
+      "same_y_attribute_last_n_steps": "Number of consecutive steps with same Y attribute",
+      "same_chart_type_last_n_steps": "Number of consecutive steps with same chart type",
+      "unique_attributes_examined": "Number of unique attributes explored",
+      "current_x_attribute": "Current X axis attribute",
+      "current_y_attribute": "Current Y axis attribute",
+      "current_chart_type": "Current visualization type",
+      "last_mouseover_points": "Recent data points user hovered over",
+      "filter_active": "Whether any filters are currently active",
+      "recent_actions": "List of last N interaction types"
+    },
+    "windows": {
+      "recent_window": 20,
+      "medium_window": 10,
+      "immediate_window": 5
+    }
+  },
+
+  "priority_rules": {
+    "description": "Rules for determining which question to ask when multiple triggers fire",
+    "rules": [
+      {
+        "condition": "Multiple triggers fire simultaneously",
+        "priority_order": ["clarity", "relevance", "accuracy", "precision", "depth", "breadth"]
+      },
+      {
+        "condition": "User is in early exploration (< 30 interactions)",
+        "boost_priority": ["clarity", "relevance"]
+      },
+      {
+        "condition": "User has many insights (> 5) but exploring aimlessly",
+        "boost_priority": ["relevance", "depth"]
+      },
+      {
+        "condition": "User just saved an insight",
+        "boost_priority": ["depth", "breadth"],
+        "wait_steps": 1
+      },
+      {
+        "condition": "User is stuck (same view > 40 steps)",
+        "boost_priority": ["breadth"],
+        "confidence_multiplier": 1.5
+      }
+    ]
+  },
+
+  "template_variables": {
+    "description": "Variables that can be used in question templates",
+    "variables": [
+      "{x_attribute}",
+      "{y_attribute}",
+      "{current_chart_type}",
+      "{point_x_value}",
+      "{point_y_value}",
+      "{insight_summary}",
+      "{insight_topic}",
+      "{vague_phrase}",
+      "{comparative_phrase}",
+      "{attribute_list}",
+      "{n_steps}",
+      "{unused_chart_type}",
+      "{suggested_attributes}",
+      "{last_insight_summary}",
+      "{current_attributes}",
+      "{stated_goal}",
+      "{primary_attribute}",
+      "{primary_finding}",
+      "{filtered_attribute}",
+      "{observation}",
+      "{attribute_1}",
+      "{attribute_2}",
+      "{aggregate_finding}"
+    ]
+  },
+
+  "decision_logic": {
+    "simple_case_threshold": {
+      "description": "Use template-based rules when scenario is simple",
+      "criteria": [
+        "interaction_count < 50",
+        "last_insight_length < 80",
+        "clear_single_trigger_match",
+        "no_complex_context_integration_needed"
+      ]
+    },
+    "complex_case_threshold": {
+      "description": "Use LLM generation when scenario is complex",
+      "criteria": [
+        "interaction_count > 100",
+        "multiple_insights_need_synthesis",
+        "last_insight_length > 100",
+        "ambiguous_trigger_match",
+        "user_response_to_previous_question_available"
+      ]
+    }
+  }
+}

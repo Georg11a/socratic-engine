@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Socratic Engine Test</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #status { font-size: 20px; margin: 20px 0; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; }
+        #log { margin-top: 20px; }
+        .question { border: 2px solid green; padding: 15px; margin: 10px 0; background: #e8f5e9; }
+        .interaction { color: #666; margin: 5px 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>Socratic Engine Test</h1>
+    <div id="status" style="color: orange;">Connecting...</div>
+    <button onclick="sendInteraction()">Send Test Interaction</button>
+    <button onclick="sendBatch()">Send 25 Interactions</button>
+    <button onclick="clearLog()">Clear Log</button>
+    <div id="log"></div>
+    
+    <script>
+        let socket;
+        let interactionCount = 0;
+        
+        try {
+            socket = io('http://localhost:3000');
+            
+            socket.on('connect', () => {
+                document.getElementById('status').innerText = '✓ Connected to server!';
+                document.getElementById('status').style.color = 'green';
+                console.log('Connected!');
+            });
+            
+            socket.on('disconnect', () => {
+                document.getElementById('status').innerText = '✗ Disconnected';
+                document.getElementById('status').style.color = 'red';
+            });
+            
+            socket.on('socratic_question_triggered', (data) => {
+                console.log('QUESTION TRIGGERED:', data);
+                const log = document.getElementById('log');
+                log.innerHTML = '<div class="question">' +
+                    '<h2>🎯 SOCRATIC QUESTION TRIGGERED!</h2>' +
+                    '<strong>Category:</strong> ' + data.category + '<br>' +
+                    '<strong>Question:</strong> ' + data.question + '<br>' +
+                    '<strong>Method:</strong> ' + data.method + '<br>' +
+                    '<strong>At Step:</strong> ' + interactionCount +
+                    '</div>' + log.innerHTML;
+            });
+        } catch(e) {
+            document.getElementById('status').innerText = 'Error: ' + e.message;
+            document.getElementById('status').style.color = 'red';
+        }
+        
+        function sendInteraction() {
+            interactionCount++;
+            const interaction = {
+                participantId: 'test_user_html',
+                appMode: 'synthetic_voters_v14.csv',
+                appType: 'CONTROL',
+                appLevel: 'live',
+                interactionType: 'chart_type_changed',
+                x_attribute: 'party',
+                y_attribute: 'income',
+                chart_changed: ['scatterplot', 'barchart', 'linechart'][interactionCount % 3],
+                interactionAt: new Date().toISOString(),
+                data: {}
+            };
+            
+            socket.emit('on_interaction', interaction);
+            const log = document.getElementById('log');
+            log.innerHTML = '<div class="interaction">📤 Sent #' + interactionCount + ': ' + interaction.interactionType + '</div>' + log.innerHTML;
+        }
+        
+        function sendBatch() {
+            for(let i = 0; i < 25; i++) {
+                setTimeout(() => sendInteraction(), i * 100);
+            }
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            interactionCount = 0;
+        }
+    </script>
+</body>
+</html>
